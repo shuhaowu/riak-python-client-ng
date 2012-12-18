@@ -49,12 +49,10 @@ class HTTPTransport(Transport):
         self._host = host
         self._port = str(port)
         self._schema = schema
-
-    def _complete_url(self, url):
-        return self._schema + "://" + self._host + ":" + self._port + url
+        self._url_prefix = self._schema + "://" + self._host + ":" + self._port
 
     def ping(self):
-        response = requests.get(self._complete_url("/ping"))
+        response = requests.get(self._url_prefix + "/ping")
         return response.status_code == 200
 
     def _parse_object(self, headers, content):
@@ -97,7 +95,7 @@ class HTTPTransport(Transport):
                                             key=quote_plus(key))
 
         params.update({"r" : r, "vclock" : vclock})
-        response = requests.get(self._complete_url(url), params=params,
+        response = requests.get(self._url_prefix + url, params=params,
                                 headers=headers)
 
         self._assert_response_code(response, self.__GET_STATUS)
@@ -172,10 +170,10 @@ class HTTPTransport(Transport):
         url = url.format(bucket=quote_plus(bucket), key=quote_plus(key))
 
         if key is None:
-            response = requests.post(self._complete_url(url), content,
+            response = requests.post(self._url_prefix + url, content,
                                     params=params, headers=headers)
         else:
-            response = requests.put(self._complete_url(url), content,
+            response = requests.put(self._url_prefix + url, content,
                                    params=params, headers=headers)
 
         self._assert_response_code(response, self.__PUT_STATUS)
@@ -207,6 +205,6 @@ class HTTPTransport(Transport):
         url = "/riak/{bucket}/{key}".format(bucket=quote_plus(bucket),
                                             key=quote_plus(key))
 
-        response = requests.delete(self._complete_url(url), params=params)
+        response = requests.delete(self._url_prefix + url, params=params)
         self._assert_response_code(response, (204, 404))
         return True
