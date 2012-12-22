@@ -19,11 +19,14 @@ from __future__ import absolute_import
 
 import unittest
 
-from riakng.core.http import HTTPTransport
-from riakng.core.exceptions import RequestError
+from ..core.http import HTTPTransport
+from ..core.exceptions import RequestError
+from . import cleanup_bucket_keys
 
 # (bucket, key) pair and to be deleted when all tests are ran.
-bucket_key_cleanups = []
+# For the times when shit fails. That and we also need to get the test
+# server going
+bucket_key_cleanups = [] # mmmm global variables
 
 class CoreFeatureTests(object):
     """This class is to be extended and the transports are to be filled in.
@@ -55,6 +58,68 @@ class CoreFeatureTests(object):
         with self.assertRaises(RequestError):
             self.transport.get(bucket, key)
 
+    def test_put_no_key(self):
+        bucket, key = "test_bucket", None
+        r = self.transport.put(bucket, key, "look ma no key!", "text/plain")
+        self.assertTrue("key" in r)
+        key = r["key"]
+        bucket_key_cleanups.append((bucket, key))
+        self.assertEquals("created", r["status"])
+
+        r = self.transport.get(bucket ,key)
+        self.assertEquals("ok", r["status"])
+        self.assertEquals("look ma no key!", r["data"])
+
+    def test_put_return_body(self):
+        bucket, key = "test_bucket", "test_return_body"
+        bucket_key_cleanups.append((bucket, key))
+        r = self.transport.put(bucket, key, "returning body", "text/plain",
+                               returnbody=True)
+        self.assertEquals("ok", r["status"])
+        self.assertTrue("data" in r)
+        self.assertEquals("returning body", r["data"])
+
+    def test_put_with_indexes(self):
+        bucket, key = "test_bucket", "test_put_indexes"
+        bucket_key_cleanups.append((bucket, key))
+
+        r = self.transport.put(bucket, key, "indexes!", "text/plain",
+                indexes=[("field1_bin", "test"), ("field2_int", 2)])
+
+        r = self.transport.get(bucket, key)
+        self.assertEquals("indexes!", r["data"])
+        self.assertEquals({"field1_bin": ["test"], "field2_int": [2]},
+                          r["indexes"])
+
+    def test_put_with_links(self):
+        bucket, key1 = "test_bucket", "test_put_links"
+        bucket_key_cleanups.append((bucket, key1))
+
+        key2 = "test_linked"
+        bucket_key_cleanups.append((bucket, key2))
+
+        self.transport.put(bucket, key2, "linked", "text/plain")
+
+        r = self.transport.put(bucket, key1, "links!", "text/plain",
+                links=[(bucket, key2, bucket)])
+
+        r = self.transport.get(bucket, key1)
+        self.assertEquals([(bucket, key2, bucket)], r["links"])
+
+    def test_put_with_meta(self):
+        bucket, key = "test_bucket", "test_put_meta"
+        bucket_key_cleanups.append((bucket, key))
+
+        self.transport.put(bucket, key, "metas!", "text/plain",
+                meta={"somemeta": 1, "someothermeta": "lol"})
+
+        r = self.transport.get(bucket, key)
+        self.assertEquals("lol", r["meta"]["someothermeta"])
+        self.assertEquals("1", r["meta"]["somemeta"]) # An unfornate side effect
+
+    def tearDown(self):
+        clean_up_bucket_keys(bucket_key_cleanups)
+
 class HTTPCoreTests(unittest.TestCase, CoreFeatureTests):
     def setUp(self):
         if not hasattr(self, "transport"):
@@ -62,5 +127,5 @@ class HTTPCoreTests(unittest.TestCase, CoreFeatureTests):
 
 if __name__ == "__main__":
     unittest.main()
-    # clean_up_bucket_keys(bucket_key_cleanups)
+    clean_up_bucket_keys(bucket_key_cleanups)
 

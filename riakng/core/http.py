@@ -28,18 +28,17 @@ def _parse_links(linkstext):
         return []
     links = []
     for link in linkstext.strip().split(","):
-        link = link.strip()
-        matches = _links_regex.match(link)
+        matches = _links_regex.match(link.strip())
         if matches is not None:
             # the regex magic forms 4 groups: ("riak", bucket, key, tag)
             # RiakLink is a 3-tuple: (bucket, key, tag)
-            links.append(matches.group(2), matches.group(3), matches.group(4))
+            links.append((matches.group(2), matches.group(3), matches.group(4)))
     return links
 
 # O.o who designed this format? Seems like me circa grade 10
 # The end ", " will are to connect them together, if you don't like it, [:-2].
 # BUG: (???) What happens if they bucket or key has commas in them?
-_riak_link_format = "<riak/{bucket}/{key}>; riaktag=\"{tag}\", "
+_riak_link_format = "</riak/{bucket}/{key}>; riaktag=\"{tag}\", "
 
 class HTTPTransport(Transport):
 
@@ -59,9 +58,9 @@ class HTTPTransport(Transport):
         r = {}
         r["data"] = content
         r["vclock"] = headers["x-riak-vclock"]
-        r["links"] = _parse_links(headers["links"])
+        r["links"] = _parse_links(headers["link"])
         r["meta"] = meta = {}
-        r["indexes"] = indexes = []
+        r["indexes"] = indexes = {}
         for header_key, header_value in headers.iteritems():
             if header_key.startswith("x-riak-meta-"):
                 meta[header_key[12:]] = header_value
@@ -72,7 +71,7 @@ class HTTPTransport(Transport):
                 i = header_value.split(", ")
                 if header_key.endswith("_int"):
                     i = list(map(int, i)) # list is for py3k compat
-                indexes[header_value[13:]] = i
+                indexes[header_key[13:]] = i
         return r
 
     def _parse_siblings(self, content):
@@ -108,6 +107,10 @@ class HTTPTransport(Transport):
         if response.status_code == 200:
             r.update(self._parse_object(response.headers, response.text))
         elif response.status_code == 300:
+            if headers.get("Accept") == "multipart/mixed":
+                # TODO: Get rid of this. Consult:
+                # http://docs.basho.com/riak/latest/references/apis/http/HTTP-Fetch-Object/
+                raise NotImplementedError("lolwut. I don't know how to handle this yet")
             r.update(self._parse_siblings(response.text))
         else:
             r["data"] = None # No content for 304 not modified
@@ -142,7 +145,7 @@ class HTTPTransport(Transport):
                     "X-Riak-Index-{0}".format(field_key),
                     [],
                 )
-                values.append(field_value)
+                values.append(str(field_value))
             for field_key, values in index_headers.iteritems():
                 index_headers[field_key] = ", ".join(values)
 
@@ -150,9 +153,9 @@ class HTTPTransport(Transport):
 
         if links:
             headers["Link"] = ""
-            for bucket, key, tag in links:
-                headers["Link"] += _riak_link_format.format(bucket=bucket,
-                                                            key=key,
+            for link_bucket, link_key, tag in links:
+                headers["Link"] += _riak_link_format.format(bucket=link_bucket,
+                                                            key=link_key,
                                                             tag=tag)
 
             # This gets rid of the final ,<space>
@@ -162,14 +165,16 @@ class HTTPTransport(Transport):
             headers["X-Riak-Vclock"] = vclock
 
         params.update({"w": w})
+        if params.get("returnbody", False):
+            params["returnbody"] = "true"
 
         url = "/riak/{bucket}"
-        if key is not None:
+        if key:
             url += "/{key}"
 
         url = url.format(bucket=quote_plus(bucket), key=quote_plus(key))
 
-        if key is None:
+        if not key:
             response = requests.post(self._url_prefix + url, content,
                                     params=params, headers=headers)
         else:
@@ -185,7 +190,8 @@ class HTTPTransport(Transport):
 
         location = response.headers["location"]
         if location:
-            r["key"] = location[location.rindex("/")]
+            # the string after the last slash is the key in http api
+            r["key"] = location[location.rindex("/")+1:]
         else:
             if key is None:
                 raise RiakngError("Server didn't respond with a key. Check riak for bugs..")
