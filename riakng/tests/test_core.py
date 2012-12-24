@@ -117,6 +117,79 @@ class CoreFeatureTests(object):
         self.assertEquals("lol", r["meta"]["someothermeta"])
         self.assertEquals("1", r["meta"]["somemeta"]) # An unfornate side effect
 
+    def test_index_operation_single(self):
+        bucket, key1 = "test_bucket", "test_key1"
+        key2 = "test_key2"
+        bucket_key_cleanups.append((bucket, key1))
+        bucket_key_cleanups.append((bucket, key2))
+
+        self.transport.put(bucket, key1, "a", "text/plain",
+                indexes=[("email_bin", "test@example.com")])
+        self.transport.put(bucket, key2, "b", "text/plain",
+                indexes=[("email_bin", "test@example.com")])
+
+        keys = self.transport.index(bucket, "email_bin", "test@example.com")
+        self.assertEquals(2, len(keys))
+        self.assertTrue(key1 in keys)
+        self.assertTrue(key2 in keys)
+
+    def test_index_operation_range(self):
+        bucket, key1, key2 = "test_bucket", "test_key1", "test_key2"
+        bucket_key_cleanups.append((bucket, key1))
+        bucket_key_cleanups.append((bucket, key2))
+
+        self.transport.put(bucket, key1, "a", "text/plain",
+                indexes=[("field_int", 2)])
+        self.transport.put(bucket, key2, "b", "text/plain",
+                indexes=[("field_int", 4)])
+
+        keys = self.transport.index(bucket, "field_int", 2, 3)
+        self.assertEquals(1, len(keys))
+        self.assertEquals(key1, keys[0])
+
+        keys = self.transport.index(bucket, "field_int", 2, 5)
+        self.assertEquals(2, len(keys))
+        self.assertTrue(key1 in keys)
+        self.assertTrue(key2 in keys)
+
+    def test_link_walk(self):
+        bucket, key1, key2, key3 = "test_bucket", "test_key1", \
+                                   "test_key2", "test_key3"
+        bucket_key_cleanups.append((bucket, key1))
+        bucket_key_cleanups.append((bucket, key2))
+        bucket_key_cleanups.append((bucket, key3))
+
+        self.transport.put(bucket, key1, "test1", "text/plain")
+        self.transport.put(bucket, key2, "test2", "text/plain",
+                links=[(bucket, key1, bucket)])
+        self.transport.put(bucket, key3, "test3", "text/plain",
+                links=[(bucket, key2, bucket), (bucket, key1, bucket)])
+
+        l = self.transport.walk_link(bucket, key1, [("_", "_", True)])
+        self.assertEquals(1, len(l))
+        self.assertEquals(0, len(l[0]))
+
+        l = self.transport.walk_link(bucket, key2, [("_", "_", True)])
+        self.assertEquals(1, len(l))
+        self.assertEquals(1, len(l[0]))
+        self.assertEquals(key1, l[0][0]["key"])
+
+        l = self.transport.walk_link(bucket, key3, [("_", "_", True)])
+        self.assertEquals(1, len(l))
+        self.assertEquals(2, len(l[0]))
+        l[0].sort(key=lambda x: x["key"])
+        self.assertEquals(key1, l[0][0]["key"])
+        self.assertEquals(key2, l[0][1]["key"])
+
+        l = self.transport.walk_link(bucket, key3, [("_", "_", True), ("_", "_", True)])
+        self.assertEquals(2, len(l))
+        self.assertEquals(2, len(l[0]))
+        self.assertEquals(1, len(l[1]))
+        l[0].sort(key=lambda x: x["key"])
+        self.assertEquals(key1, l[0][0]["key"])
+        self.assertEquals(key2, l[0][1]["key"])
+        self.assertEquals(key1, l[1][0]["key"])
+
     def tearDown(self):
         clean_up_bucket_keys(bucket_key_cleanups)
 

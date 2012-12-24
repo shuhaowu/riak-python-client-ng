@@ -214,3 +214,93 @@ class HTTPTransport(Transport):
         response = requests.delete(self._url_prefix + url, params=params)
         self._assert_response_code(response, (204, 404))
         return True
+
+    def index(self, bucket, field, start, end=None):
+        url = "/buckets/{bucket}/index/{field}/{start}"
+        if end:
+            url += "/{end}"
+            url = url.format(bucket=bucket, field=field, start=start, end=end)
+        else:
+            url = url.format(bucket=bucket, field=field, start=start)
+
+        if len(field) <= 4 or field[-3:] not in ("bin", "int"):
+            raise RiakngError("2i fields must end with either _bin or _int.")
+        response = requests.get(self._url_prefix + url)
+        self._assert_response_code(response, (200, ))
+        return response.json()["keys"]
+
+    BOUNDARY_REGEX = re.compile("multipart/mixed; boundary=([a-zA-Z0-9]+)")
+    def _parse_linked_object_part(self, boundary, content):
+        # first we need to parse through each item in the list.
+        parts = []
+        startsep = "--" + boundary
+        seplen = len(startsep)
+        content = content.strip()
+        start = 0
+
+        # Use loop to find each section separated by the boundaries
+        while True:
+            # Find the starting separator, and then set the start spot to be
+            # immediately after it
+            start = content.find(startsep, start) + seplen
+
+            # Find the ending separator, between the start and the end is the
+            # a part of the multipart response
+            end = content.find(startsep, start)
+
+            # This means that either start was not found or end was not found.
+            # Note that "".find("a", 1000) == -1 as start > length
+            if start == -1 or end == -1:
+                break
+
+            # Now that we got the part, we parse it for headers and content
+            part = content[start:end].strip()
+            headers, sep, c = part.partition("\r\n\r\n")
+            h = {}
+
+            # Parse through the headers
+            for line in headers.strip().split("\r\n"):
+                k, sep, v = line.partition(": ")
+                h[k.lower()] = v.strip()
+
+            # This is if there is a link phase, Riak returns with 1 header of
+            # Content-Type and has the content as that phase. So we need to
+            # recursively call this function
+            if len(h) == 1 and "multipart/mixed" in h.values()[0]:
+                cbound = self.BOUNDARY_REGEX.match(h["content-type"])
+                if not cbound: # Can't think of a scenario where this happens
+                    raise RiakngError(
+                        "There's a bug in riak or this client: {0}".format(part)
+                    )
+                cbound = cbound.group(1)
+                parts.append(self._parse_linked_object_part(cbound, c))
+            else:
+                # TODO: is it possible for this to be siblinggs and we have to
+                # parse through the siblings?
+                response = self._parse_object(h, c)
+                location = h.get("location")
+                # I don't see why this will ever be False.. but I'm too scared
+                # to remove it.
+                if location:
+                    response["key"] = location[location.rindex("/")+1:]
+                parts.append(response)
+
+        return parts
+
+    def walk_link(self, bucket, key, link_phases):
+        url = "/riak/{bucket}/{key}".format(bucket=bucket, key=key)
+        for b, tag, keep in link_phases:
+            url += "/{bucket},{tag},{keep}".format(bucket=b, tag=tag,
+                                                   keep=str(int(keep)))
+
+        response = requests.get(self._url_prefix + url)
+        self._assert_response_code(response, (200, ))
+        boundary = self.BOUNDARY_REGEX.match(response.headers["content-type"])
+        if not boundary: # again, same thing. This is a bug if it happens..
+            raise RiakngError(
+                "There's a bug in riak or this client: {0}".format(
+                    response.headers
+                )
+            )
+        boundary = boundary.group(1)
+        return self._parse_linked_object_part(boundary, response.content)

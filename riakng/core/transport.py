@@ -148,6 +148,32 @@ class Transport(object):
         """
         raise NotImplementedError
 
+    def index(self, bucket, field, start, end=None):
+        """Perform an indexing operation.
+
+        :param bucket: The bucket name
+        :param field: The field name
+        :param start: The start value
+        :param end: The end value. Defaults to None. If left as None, start w
+                    be used as an exact value.
+        :rtypes: A list of keys.
+        """
+        raise NotImplementedError
+
+    def walk_link(self, bucket, key, link_phases):
+        """Walks link.
+
+        :param bucket: The bucket of the object performing the link walk on
+        :param key: The key of the object performing the link walk on
+        :param link_phases: A list of link phases, which are a 3-tuple consists
+                            of (bucket, tag, keep), where bucket is the bucket
+                            to restrict links to, the tag, and keep indicates
+                            whether to return results from this phase.
+                            For more info: http://docs.basho.com/riak/latest/references/apis/http/HTTP-Link-Walking/
+        :rtype: A list of objects similar to what get returns.
+        """
+        raise NotImplementedError
+
     def get_keys(self, bucket):
         """Gets a list of keys from the database.
 
@@ -192,18 +218,6 @@ class Transport(object):
         :param query: The query dictionary
         :param timeout: Timeout values.
         :rtype: A list of results. These results are decoded via json.loads"""
-        raise NotImplementedError
-
-    def index(self, bucket, field, start, end=None):
-        """Perform an indexing operation.
-
-        :param bucket: The bucket name
-        :param field: The field name
-        :param start: The start value
-        :param end: The end value. Defaults to None. If left as None, start w
-                    be used as an exact value.
-        :rtypes: A list of keys.
-        """
         raise NotImplementedError
 
     class SolrTransport(object):
