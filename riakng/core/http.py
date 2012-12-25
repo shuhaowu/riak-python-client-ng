@@ -15,9 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 from __future__ import absolute_import
-import requests
+
 import re
 from urllib import quote_plus
+import json
+
+# If this is unavailable, this module will not be available.
+import requests
 
 from .transport import Transport
 from .exceptions import HTTPRequestError, RiakngError
@@ -41,7 +45,10 @@ def _parse_links(linkstext):
 _riak_link_format = "</riak/{bucket}/{key}>; riaktag=\"{tag}\", "
 
 class HTTPTransport(Transport):
-
+    """Transport for HTTP. This class uses the requests module to make all the
+    requests and implements all API defined by Riak with HTTP, including the
+    link walking interface.
+    """
     def __init__(self, client_id=None, host="127.0.0.1", port=8098,
                  schema="http"):
         self._client_id = client_id or self.random_client_id()
@@ -58,7 +65,10 @@ class HTTPTransport(Transport):
         r = {}
         r["data"] = content
         r["vclock"] = headers["x-riak-vclock"]
+        r["content-type"] = headers.get("content-type")
         r["links"] = _parse_links(headers["link"])
+        r["vtag"] = headers.get("etag")
+        r["last-modified"] = headers.get("last-modified")
         r["meta"] = meta = {}
         r["indexes"] = indexes = {}
         for header_key, header_value in headers.iteritems():
@@ -76,7 +86,7 @@ class HTTPTransport(Transport):
 
     def _parse_siblings(self, content):
         siblings = content.strip().split("\n")
-        r = {"data": siblings[1:]}
+        r = {"siblings": siblings[1:]}
         return r
 
     def _assert_response_code(self, response, expected):
@@ -105,7 +115,7 @@ class HTTPTransport(Transport):
             }
 
         if response.status_code == 200:
-            r.update(self._parse_object(response.headers, response.text))
+            r["siblings"] = [self._parse_object(response.headers, response.text)]
         elif response.status_code == 300:
             if headers.get("Accept") == "multipart/mixed":
                 # TODO: Get rid of this. Consult:
@@ -113,7 +123,7 @@ class HTTPTransport(Transport):
                 raise NotImplementedError("lolwut. I don't know how to handle this yet")
             r.update(self._parse_siblings(response.text))
         else:
-            r["data"] = None # No content for 304 not modified
+            r["siblings"] = [] # No content for 304 not modified
 
         return r
 
@@ -203,7 +213,7 @@ class HTTPTransport(Transport):
             r.update(self._parse_siblings(response.text))
         elif response.status_code in (200, 201) and \
                 params.get("returnbody", False):
-            r.update(self._parse_object(response.headers, response.text))
+            r["siblings"] = [self._parse_object(response.headers, response.text)]
         # 204 is the other case, but since there's no content?
         return r
 
@@ -304,3 +314,48 @@ class HTTPTransport(Transport):
             )
         boundary = boundary.group(1)
         return self._parse_linked_object_part(boundary, response.content)
+
+    def mapreduce(self, inputs, query, timeout=None):
+        headers = {"Content-Type": "application/json"}
+        content = {"inputs" : inputs, "query" : query}
+        if timeout:
+            content["timeout"] = timeout
+        response = requests.post(self._url_prefix + "/mapred",
+                                 json.dumps(content),
+                                 headers=headers)
+        self._assert_response_code(response, (200, ))
+
+        return response.json()
+
+    def get_keys(self, bucket):
+        params = {"keys" : "true", "props": "false"}
+        url = "/riak/{bucket}".format(bucket=bucket)
+        response = requests.get(self._url_prefix + url, params=params)
+        self._assert_response_code(response, (200,))
+        return response.json()["keys"]
+
+    def get_buckets(self):
+        params = {"buckets" : "true"}
+        response = requests.get(self._url_prefix + "/riak", params=params)
+        self._assert_response_code(response, (200, ))
+        return response.json()["buckets"]
+
+    def get_bucket_properties(self, bucket):
+        params = {"keys" : "false", "props" : "true"}
+        url = "/riak/{bucket}".format(bucket=bucket)
+        response = requests.get(self._url_prefix + url, params=params)
+        self._assert_response_code(response, (200, ))
+        return response.json()["props"]
+
+    def set_bucket_properties(self, bucket, properties):
+        content = {"props" : properties}
+        url = "/riak/{bucket}".format(bucket=bucket)
+        response = requests.put(self._url_prefix + url, json.dumps(content))
+        self._assert_response_code(response, (200, ))
+        return True
+
+    def stats(self):
+        response = requests.get(self._url_prefix + "/stats")
+        self._assert_response_code(response, (200, ))
+        return response.json()
+

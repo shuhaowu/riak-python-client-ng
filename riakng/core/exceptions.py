@@ -21,3 +21,4 @@ class RequestError(RiakngError):
         super(RequestError, self).__init__(message)
         self.code = code
 class HTTPRequestError(RequestError): pass
+class PBCRequestError(RequestError): pass

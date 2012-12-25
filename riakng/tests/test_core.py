@@ -20,6 +20,7 @@ from __future__ import absolute_import
 import unittest
 
 from ..core.http import HTTPTransport
+from ..core.pbc import PBCTransport
 from ..core.exceptions import RequestError
 from . import cleanup_bucket_keys
 
@@ -51,7 +52,14 @@ class CoreFeatureTests(object):
         r = self.transport.get(bucket, key)
         self.assertEquals("ok", r["status"])
         self.assertTrue("headers" in r)
-        self.assertEquals("hello world", r["data"])
+
+        sibling = r.get("siblings")[0]
+        self.assertEquals("hello world", sibling["data"])
+
+        self.assertTrue(sibling.get("vtag"))
+        self.assertTrue(sibling.get("vclock"))
+        self.assertTrue(sibling.get("content-type"))
+        self.assertTrue(sibling.get("last-modified"))
 
         self.assertTrue(self.transport.delete(bucket, key))
 
@@ -68,7 +76,7 @@ class CoreFeatureTests(object):
 
         r = self.transport.get(bucket ,key)
         self.assertEquals("ok", r["status"])
-        self.assertEquals("look ma no key!", r["data"])
+        self.assertEquals("look ma no key!", r["siblings"][0]["data"])
 
     def test_put_return_body(self):
         bucket, key = "test_bucket", "test_return_body"
@@ -76,20 +84,20 @@ class CoreFeatureTests(object):
         r = self.transport.put(bucket, key, "returning body", "text/plain",
                                returnbody=True)
         self.assertEquals("ok", r["status"])
-        self.assertTrue("data" in r)
-        self.assertEquals("returning body", r["data"])
+        self.assertTrue("data" in r["siblings"][0])
+        self.assertEquals("returning body", r["siblings"][0]["data"])
 
     def test_put_with_indexes(self):
         bucket, key = "test_bucket", "test_put_indexes"
         bucket_key_cleanups.append((bucket, key))
 
-        r = self.transport.put(bucket, key, "indexes!", "text/plain",
-                indexes=[("field1_bin", "test"), ("field2_int", 2)])
+        self.transport.put(bucket, key, "indexes!", "text/plain",
+            indexes=[("field1_bin", "test"), ("field2_int", 2)])
 
         r = self.transport.get(bucket, key)
-        self.assertEquals("indexes!", r["data"])
+        self.assertEquals("indexes!", r["siblings"][0]["data"])
         self.assertEquals({"field1_bin": ["test"], "field2_int": [2]},
-                          r["indexes"])
+                          r["siblings"][0]["indexes"])
 
     def test_put_with_links(self):
         bucket, key1 = "test_bucket", "test_put_links"
@@ -100,11 +108,11 @@ class CoreFeatureTests(object):
 
         self.transport.put(bucket, key2, "linked", "text/plain")
 
-        r = self.transport.put(bucket, key1, "links!", "text/plain",
-                links=[(bucket, key2, bucket)])
+        self.transport.put(bucket, key1, "links!", "text/plain",
+            links=[(bucket, key2, bucket)])
 
         r = self.transport.get(bucket, key1)
-        self.assertEquals([(bucket, key2, bucket)], r["links"])
+        self.assertEquals([(bucket, key2, bucket)], r["siblings"][0]["links"])
 
     def test_put_with_meta(self):
         bucket, key = "test_bucket", "test_put_meta"
@@ -114,8 +122,8 @@ class CoreFeatureTests(object):
                 meta={"somemeta": 1, "someothermeta": "lol"})
 
         r = self.transport.get(bucket, key)
-        self.assertEquals("lol", r["meta"]["someothermeta"])
-        self.assertEquals("1", r["meta"]["somemeta"]) # An unfornate side effect
+        self.assertEquals("lol", r["siblings"][0]["meta"]["someothermeta"])
+        self.assertEquals("1", r["siblings"][0]["meta"]["somemeta"]) # An unfornate side effect
 
     def test_index_operation_single(self):
         bucket, key1 = "test_bucket", "test_key1"
@@ -151,6 +159,49 @@ class CoreFeatureTests(object):
         self.assertEquals(2, len(keys))
         self.assertTrue(key1 in keys)
         self.assertTrue(key2 in keys)
+
+    def test_mapreduce(self):
+        raise NotImplementedError("Implement this unittest!")
+
+    def test_get_buckets(self):
+        raise NotImplementedError("Implement this unittest!")
+
+    def test_set_bucket_properties(self):
+        raise NotImplementedError("Implement this unittest!")
+
+    def test_get_bucket_properties(self):
+        raise NotImplementedError("Implement this unittest!")
+
+    def test_stats(self):
+        raise NotImplementedError("Implement this unittest!")
+
+    def test_get_keys(self):
+        bucket, key1, key2, key3 = "test_get_keys_bucket", \
+                                   "test_key1", "test_key2", "test_key3"
+
+        self.transport.put(bucket, key1, "a", "text/plain")
+        self.transport.put(bucket, key2, "a", "text/plain")
+        self.transport.put(bucket, key3, "a", "text/plain")
+
+        keys = self.transport.get_keys(bucket)
+        self.assertEquals(3, len(keys))
+        keys.sort()
+        self.assertEquals(key1, keys[0])
+        self.assertEquals(key2, keys[1])
+        self.assertEquals(key3, keys[2])
+
+    def tearDown(self):
+        clean_up_bucket_keys(bucket_key_cleanups)
+
+class PBCCoreTests(unittest.TestCase, CoreFeatureTests):
+    def setUp(self):
+        if not hasattr(self, "transport"):
+            self.transport = PBCTransport()
+
+class HTTPCoreTests(unittest.TestCase, CoreFeatureTests):
+    def setUp(self):
+        if not hasattr(self, "transport"):
+            self.transport = HTTPTransport()
 
     def test_link_walk(self):
         bucket, key1, key2, key3 = "test_bucket", "test_key1", \
@@ -190,15 +241,7 @@ class CoreFeatureTests(object):
         self.assertEquals(key2, l[0][1]["key"])
         self.assertEquals(key1, l[1][0]["key"])
 
-    def tearDown(self):
-        clean_up_bucket_keys(bucket_key_cleanups)
-
-class HTTPCoreTests(unittest.TestCase, CoreFeatureTests):
-    def setUp(self):
-        if not hasattr(self, "transport"):
-            self.transport = HTTPTransport()
-
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(verbosity=2)
     clean_up_bucket_keys(bucket_key_cleanups)
 

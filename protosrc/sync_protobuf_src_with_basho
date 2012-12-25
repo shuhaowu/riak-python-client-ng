@@ -1,0 +1,8 @@
+#!/bin/bash
+
+wget -N https://raw.github.com/basho/riak_pb/master/src/riak.proto
+wget -N https://raw.github.com/basho/riak_pb/master/src/riak_kv.proto
+wget -N https://raw.github.com/basho/riak_pb/master/src/riak_search.proto
+echo 
+echo ALL DONE!
+echo Now you can compile with compile_protobuf

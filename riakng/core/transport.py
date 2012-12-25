@@ -35,9 +35,20 @@ class Transport(object):
         - Link: (bucket, key, tag) <- 3 item tuple
         - 2i:   (field, value)     <- 2 item tuple
 
+    Format for a riak object:
+        {
+            "key": key, # Optional, not present during a get request
+            "vtag": vtag, # Optional, only if riak returns
+            "vclock": vclock, # Optional, only if riak returns
+            "deleted": True/False, # Only in PBC
+            "content-type": content_type,
+            "last-modified": last_modified,
+            "meta": meta # meta that you defined
+            "links": links # riak links in the format list above
+            "indexes": indexes # indexes are listed with a dictionary with key: [index1, index2]
+            "data": The data in a string format
+        }
     """
-    # Subclass should specify API level.
-    # api = 2
 
     def __init__(self, cm=None, client_id=None):
         """Initialize a new transport class.
@@ -77,20 +88,21 @@ class Transport(object):
         :type key: string
         :param r: The R value, defaults to None, which is the db default
         :type r: integer
-        :param vclock: The riak vector clock value
+        :param vclock: The riak vector clock value, ignored with PBC client
         :type vclock: string
         :param headers: Additional header parameters, check
                         http://docs.basho.com/riak/latest/references/apis/http/HTTP-Fetch-Object/
                         for details. Example: `headers={"Accept": "multipart/mixed"}`
+                        Note: this parameter is ignored with the pbc client.
         :type headers: dict
         :param params: Additional optional parameters. Check the same link as
                        headers. Does not include r or vclock
-        :rtype: Returns a dictionary. This dictionary will always have a 'data'
-                and it contains the data. There also will be a 'status' field
-                which contains either 'ok', 'multiple_choice', or 'not_modified'
-                There's also 'meta', 'vclock', 'indexes', 'links' field if
-                applicable. For HTTP, The 'header' field is attached and data is
-                returned as bytes.
+        :rtype: Returns a dictionary. This dictionary can be a little messy:
+                "status" : "ok" or "multiple_choice" or "not_modified"
+                "headers" : the http response headers if the transport is http
+                "siblings": [object_data], object_data has the format of the
+                            riak object listed in the Transport class's
+                            docstring.
         """
         raise NotImplementedError
 
@@ -131,7 +143,8 @@ class Transport(object):
         :rtype: A dictionary of things returned from Riak. This dictionary will
                 always include 'key', which is the key of the new/updated object
                 If returnbody=True, the response will look exactly like the get
-                return, except with the added 'key' field.
+                return, except with the added 'key' field. (i.e. the dictionary
+                will now contain a "key" and a "siblings" field)
         """
         raise NotImplementedError
 
@@ -174,6 +187,15 @@ class Transport(object):
         """
         raise NotImplementedError
 
+    def mapreduce(self, inputs, query, timeout=None):
+        """Map reduces on the database.
+
+        :param input: The input
+        :param query: The query dictionary
+        :param timeout: Timeout values.
+        :rtype: The JSON that riak returns"""
+        raise NotImplementedError
+
     def get_keys(self, bucket):
         """Gets a list of keys from the database.
 
@@ -211,13 +233,13 @@ class Transport(object):
         """
         raise NotImplementedError
 
-    def mapreduce(self, inputs, query, timeout=None):
-        """Map reduces on the database.
+    def stats(self):
+        """Get Riak status.
 
-        :param input: The input
-        :param query: The query dictionary
-        :param timeout: Timeout values.
-        :rtype: A list of results. These results are decoded via json.loads"""
+        See http://docs.basho.com/riak/latest/references/apis/http/HTTP-Status/
+        for details.
+
+        :rtype: The JSON that is the Riak status"""
         raise NotImplementedError
 
     class SolrTransport(object):

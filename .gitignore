@@ -2,3 +2,7 @@
 *.pyc
 *.nja
 *.swp
+protosrc/*.proto
+riakng/core/riakpb/*
+!riakng/core/riakpb/__init__.py
+

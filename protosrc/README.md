@@ -1,0 +1,3 @@
+Protobuf definitions...
+
+To be synchronized with https://github.com/basho/riak_pb/tree/master/src
